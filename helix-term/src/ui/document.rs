@@ -258,6 +258,7 @@ pub struct TextRenderer<'a> {
     surface: &'a mut Surface,
     pub text_style: Style,
     pub whitespace_style: Style,
+    pub newline_style: Style,
     pub indent_guide_char: String,
     pub indent_guide_style: Style,
     pub newline: NewlineRendering,
@@ -345,6 +346,9 @@ impl<'a> TextRenderer<'a> {
             tab,
             virtual_tab,
             whitespace_style: theme.get("ui.virtual.whitespace"),
+            newline_style: theme
+                .try_get("ui.virtual.newline")
+                .unwrap_or_else(|| theme.get("ui.virtual.whitespace")),
             indent_width,
             starting_indent: offset.col / indent_width as usize
                 + (offset.col % indent_width as usize != 0) as usize
@@ -420,7 +424,11 @@ impl<'a> TextRenderer<'a> {
         // TODO is it correct to apply the whitespace style to all unicode white spaces?
         let mut style = grapheme_style.syntax_style;
         if is_whitespace {
-            style = style.patch(self.whitespace_style);
+            style = if grapheme == Grapheme::Newline {
+                style.patch(self.newline_style)
+            } else {
+                style.patch(self.whitespace_style)
+            };
         }
         style = style.patch(grapheme_style.overlay_style);
 
