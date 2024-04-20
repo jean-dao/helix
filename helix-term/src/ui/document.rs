@@ -164,6 +164,7 @@ pub fn render_text(
         .unwrap_or_else(|| (Style::default(), usize::MAX));
     let mut reached_view_top = false;
 
+    let mut previous_was_whitespace = false;
     loop {
         let Some(mut grapheme) = formatter.next() else {
             break;
@@ -234,6 +235,7 @@ pub fn render_text(
         decorations.decorate_grapheme(renderer, &grapheme);
 
         let virt = grapheme.is_virtual();
+        let is_whitespace = grapheme.is_whitespace() && grapheme.raw != Grapheme::Newline;
         let grapheme_width = renderer.draw_grapheme(
             grapheme.raw,
             grapheme_style,
@@ -241,8 +243,10 @@ pub fn render_text(
             &mut last_line_indent_level,
             &mut is_in_indent_area,
             grapheme.visual_pos,
+            previous_was_whitespace,
         );
         last_line_end = grapheme.visual_pos.col + grapheme_width;
+        previous_was_whitespace = is_whitespace;
     }
 
     renderer.draw_indent_guides(last_line_indent_level, last_line_pos.visual_line);
@@ -256,7 +260,7 @@ pub struct TextRenderer<'a> {
     pub whitespace_style: Style,
     pub indent_guide_char: String,
     pub indent_guide_style: Style,
-    pub newline: String,
+    pub newline: NewlineRendering,
     pub nbsp: String,
     pub nnbsp: String,
     pub space: String,
@@ -272,6 +276,13 @@ pub struct TextRenderer<'a> {
 pub struct GraphemeStyle {
     syntax_style: Style,
     overlay_style: Style,
+}
+
+#[derive(Debug)]
+pub struct NewlineRendering {
+    ws_render: WhitespaceRenderValue,
+    none: String,
+    all: String,
 }
 
 impl<'a> TextRenderer<'a> {
@@ -297,10 +308,11 @@ impl<'a> TextRenderer<'a> {
             " ".repeat(tab_width)
         };
         let virtual_tab = " ".repeat(tab_width);
-        let newline = if ws_render.newline() == WhitespaceRenderValue::All {
-            ws_chars.newline.into()
-        } else {
-            " ".to_owned()
+
+        let newline = NewlineRendering {
+            ws_render: ws_render.newline(),
+            none: " ".to_owned(),
+            all: ws_chars.newline.into(),
         };
 
         let space = if ws_render.space() == WhitespaceRenderValue::All {
@@ -396,6 +408,7 @@ impl<'a> TextRenderer<'a> {
         last_indent_level: &mut usize,
         is_in_indent_area: &mut bool,
         mut position: Position,
+        previous_was_whitespace: bool,
     ) -> usize {
         if position.row < self.offset.row {
             return 0;
@@ -430,7 +443,17 @@ impl<'a> TextRenderer<'a> {
             Grapheme::Other { ref g } if g == "\u{00A0}" => nbsp,
             Grapheme::Other { ref g } if g == "\u{202F}" => nnbsp,
             Grapheme::Other { ref g } => g,
-            Grapheme::Newline => &self.newline,
+            Grapheme::Newline => match self.newline.ws_render {
+                WhitespaceRenderValue::None => &self.newline.none,
+                WhitespaceRenderValue::All => &self.newline.all,
+                WhitespaceRenderValue::AfterWhitespace => {
+                    if previous_was_whitespace {
+                        &self.newline.all
+                    } else {
+                        &self.newline.none
+                    }
+                }
+            },
         };
 
         let in_bounds = self.column_in_bounds(position.col, width);
